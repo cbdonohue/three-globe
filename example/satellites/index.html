@@ -21,12 +21,39 @@
       bottom: 10px;
       right: 10px;
     }
+
+    #title {
+      position: absolute;
+      font-size: 18px;
+      font-family: sans-serif;
+      padding: 10px;
+      border-radius: 5px;
+      background-color: rgba(0, 0, 0, 0.3);
+      color: white;
+      top: 10px;
+      left: 10px;
+    }
+
+    #info {
+      position: absolute;
+      font-size: 11px;
+      font-family: sans-serif;
+      padding: 8px;
+      border-radius: 3px;
+      background-color: rgba(0, 0, 0, 0.2);
+      color: #cccccc;
+      bottom: 10px;
+      left: 10px;
+      max-width: 200px;
+    }
   </style>
 </head>
 
 <body>
   <div id="globeViz"></div>
+  <div id="title">🛰️ Starlink Constellation</div>
   <div id="time-log"></div>
+  <div id="info">Real-time Starlink satellite positions<br/>Data: CelesTrak</div>
 
   <script type="module">
     import ThreeGlobe from 'https://esm.sh/three-globe?external=three';
@@ -44,14 +71,15 @@
       .particleLat('lat')
       .particleLng('lng')
       .particleAltitude('alt')
-      .particlesSize(2);
+      .particlesSize(1.5);
 
     new THREE.TextureLoader().load('./sat-icon.png', texture => {
       texture.colorSpace = THREE.SRGBColorSpace;
       Globe.particlesTexture(texture);
     });
 
-    fetch('./space-track-leo.txt').then(r => r.text()).then(rawData => {
+    // Fetch real Starlink satellite data from CelesTrak
+    fetch('https://celestrak.org/NORAD/elements/starlink.txt').then(r => r.text()).then(rawData => {
       const tleData = rawData.replace(/\r/g, '').split(/\n(?=[^12])/).map(tle => tle.split('\n'));
       const satData = tleData.map(([name, ...tle]) => ({
         satrec: satellite.twoline2satrec(...tle),
@@ -59,6 +87,8 @@
       }))
       // exclude those that can't be propagated
       .filter(d => !!satellite.propagate(d.satrec, new Date())?.position);
+
+      console.log(`Loaded ${satData.length} Starlink satellites`);
 
       // time ticker
       let time = new Date();
@@ -87,6 +117,44 @@
 
         Globe.particlesData([satData.filter(d => !isNaN(d.lat) && !isNaN(d.lng) && !isNaN(d.alt))]);
       })();
+    }).catch(error => {
+      console.error('Failed to load Starlink data:', error);
+      // Fallback to local data if CelesTrak is unavailable
+      fetch('./space-track-leo.txt').then(r => r.text()).then(rawData => {
+        const tleData = rawData.replace(/\r/g, '').split(/\n(?=[^12])/).map(tle => tle.split('\n'));
+        const satData = tleData.map(([name, ...tle]) => ({
+          satrec: satellite.twoline2satrec(...tle),
+          name: name.trim().replace(/^0 /, '')
+        }))
+        .filter(d => !!satellite.propagate(d.satrec, new Date())?.position);
+
+        console.log(`Fallback: Loaded ${satData.length} satellites from local data`);
+
+        let time = new Date();
+        (function frameTicker() {
+          requestAnimationFrame(frameTicker);
+
+          time = new Date(+time + TIME_STEP);
+          timeLogger.innerText = time.toString();
+
+          const gmst = satellite.gstime(time);
+          satData.forEach(d => {
+            const eci = satellite.propagate(d.satrec, time);
+            if (eci?.position) {
+              const gdPos = satellite.eciToGeodetic(eci.position, gmst);
+              d.lat = satellite.radiansToDegrees(gdPos.latitude);
+              d.lng = satellite.radiansToDegrees(gdPos.longitude);
+              d.alt = gdPos.height / EARTH_RADIUS_KM
+            } else {
+              d.lat = NaN;
+              d.lng = NaN;
+              d.alt = NaN;
+            }
+          });
+
+          Globe.particlesData([satData.filter(d => !isNaN(d.lat) && !isNaN(d.lng) && !isNaN(d.alt))]);
+        })();
+      });
     });
 
     //
@@ -107,6 +175,7 @@
     const camera = new THREE.PerspectiveCamera();
     camera.aspect = window.innerWidth/window.innerHeight;
     camera.updateProjectionMatrix();
+
     camera.position.z = 400;
 
     // Add camera controls
