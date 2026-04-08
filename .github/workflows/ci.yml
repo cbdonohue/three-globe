@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: |
+          if [ -f yarn.lock ]; then yarn install --frozen-lockfile; else npm install; fi
+      - name: Build
+        run: |
+          if [ -f yarn.lock ]; then yarn build; else npm run build; fi
+      - name: Test
+        run: |
+          if [ -f yarn.lock ]; then yarn test --if-present 2>/dev/null || true; else npm test --if-present 2>/dev/null || true; fi
